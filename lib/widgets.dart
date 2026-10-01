@@ -3,6 +3,7 @@ import 'dart:math';
 import 'package:flutter/material.dart';
 
 import 'game/gem_art.dart';
+import 'levels.dart';
 import 'services.dart';
 import 'theme.dart';
 
@@ -407,6 +408,14 @@ class BoosterIcon extends StatelessWidget {
 }
 
 CustomPainter boosterPainter(String kind) => _BoosterPainter(kind);
+
+/// Colour coding for the difficulty tiers.
+Color tierColor(Difficulty d) => const [
+      Color(0xFF22B35E), // easy
+      Color(0xFF1E8FE8), // medium
+      Color(0xFFF08A1C), // hard
+      Color(0xFFE5394E), // very hard
+    ][d.index];
 
 /// Gold rating star; [filled] false draws the empty slot.
 class StarIcon extends StatelessWidget {

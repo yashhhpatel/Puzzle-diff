@@ -28,7 +28,10 @@ const _boosterLevels = [7, 11, 16];
 class GameScreen extends StatefulWidget {
   /// Plays today's Daily Challenge instead of the next level.
   final bool daily;
-  const GameScreen({super.key, this.daily = false});
+
+  /// Replays this level (after all levels are done) without advancing.
+  final int? replay;
+  const GameScreen({super.key, this.daily = false, this.replay});
   @override
   State<GameScreen> createState() => _GameScreenState();
 }
@@ -48,6 +51,7 @@ class _GameScreenState extends State<GameScreen> with SingleTickerProviderStateM
   final _coinKey = GlobalKey();
   Timer? _autoTimer;
   int _par = 1;
+  Difficulty? _tierBanner;
   int _stars = 3;
 
   @override
@@ -69,7 +73,15 @@ class _GameScreenState extends State<GameScreen> with SingleTickerProviderStateM
 
   void _startLevel() {
     final now = DateTime.now();
-    final lvl = widget.daily ? 0 : Progress.I.level;
+    final lvl = widget.daily ? 0 : (widget.replay ?? Progress.I.level.clamp(1, kMaxLevel));
+    // Announce a new difficulty tier on its first level.
+    final tier = difficultyOf(lvl);
+    if (!widget.daily && widget.replay == null && lvl > 1 && lvl == tier.firstLevel) {
+      _tierBanner = tier;
+      Future.delayed(const Duration(milliseconds: 2600), () {
+        if (mounted) setState(() => _tierBanner = null);
+      });
+    }
     final tutorial = !widget.daily && lvl == 1;
     final data = widget.daily ? buildDaily(now) : buildLevel(lvl);
     _par = parMoves(widget.daily ? 'D${Progress.dateKey(now)}' : 'L$lvl', data, tutorial: tutorial);
@@ -121,9 +133,25 @@ class _GameScreenState extends State<GameScreen> with SingleTickerProviderStateM
       Progress.I.dailyDone = Progress.dateKey(DateTime.now());
       Progress.I.save();
       _goHome();
+    } else if (widget.replay != null || game.level >= kMaxLevel) {
+      // Replays don't advance; finishing level 1000 completes the game.
+      if (game.level >= kMaxLevel && Progress.I.level <= kMaxLevel) {
+        Progress.I.level = kMaxLevel + 1;
+        Progress.I.save();
+      }
+      _finishToHome(game.level);
     } else {
       _nextLevel(game.level);
     }
+  }
+
+  Future<void> _finishToHome(int completed) async {
+    setState(() {
+      _complete = false;
+      _loading = true;
+    });
+    await Ads.I.afterLevel(completed);
+    if (mounted) _goHome();
   }
 
   void _goHome() {
@@ -141,6 +169,11 @@ class _GameScreenState extends State<GameScreen> with SingleTickerProviderStateM
       _loading = true;
     });
     final minLoading = Future.delayed(const Duration(milliseconds: 1400));
+    // Generate the next puzzle (and its par) behind the loading screen; both
+    // are cached, so _startLevel below is instant.
+    await Future.delayed(const Duration(milliseconds: 60));
+    final next = Progress.I.level.clamp(1, kMaxLevel);
+    parMoves('L$next', buildLevel(next), tutorial: next == 1);
     // Interstitial (every 2nd level, unless Remove Ads) plays over the loading
     // screen; the next level is only built once it has been closed.
     await Ads.I.afterLevel(completed);
@@ -239,6 +272,7 @@ class _GameScreenState extends State<GameScreen> with SingleTickerProviderStateM
             if (game.tutorial != null && !game.busy) _hand(layout, w),
             _hud(w, h, dimmed: dim),
             if (_tooltip >= 0) _tooltipBubble(w, h),
+            if (_tierBanner != null && !_complete) _tierBannerView(w, h, _tierBanner!),
             if (_popup != _Popup.none) ..._popupLayer(w, h),
             if (_complete)
               Positioned.fill(
@@ -308,6 +342,41 @@ class _GameScreenState extends State<GameScreen> with SingleTickerProviderStateM
     ]);
   }
 
+  static const _tierHints = [
+    '',
+    'Bigger pictures and more colours!',
+    'Smaller groups - plan your shelf!',
+    'The toughest puzzles. Good luck!',
+  ];
+
+  Widget _tierBannerView(double w, double h, Difficulty tier) => Positioned(
+        left: w * 0.08,
+        right: w * 0.08,
+        top: h * 0.17,
+        child: IgnorePointer(
+          child: TweenAnimationBuilder<double>(
+            tween: Tween(begin: 0, end: 1),
+            duration: const Duration(milliseconds: 450),
+            curve: Curves.easeOutBack,
+            builder: (_, v, child) => Transform.scale(scale: v, child: child),
+            child: Container(
+              padding: EdgeInsets.symmetric(vertical: w * 0.03, horizontal: w * 0.04),
+              decoration: BoxDecoration(
+                color: tierColor(tier),
+                borderRadius: BorderRadius.circular(w * 0.05),
+                border: Border.all(color: Colors.white, width: w * 0.012),
+                boxShadow: [BoxShadow(color: Colors.black.withAlpha(50), blurRadius: 10, offset: const Offset(0, 4))],
+              ),
+              child: Column(mainAxisSize: MainAxisSize.min, children: [
+                buttonLabel('${tier.label.toUpperCase()} LEVELS', w * 0.07),
+                SizedBox(height: w * 0.01),
+                Text(_tierHints[tier.index], textAlign: TextAlign.center, style: bodyStyle(w * 0.04, color: Colors.white)),
+              ]),
+            ),
+          ),
+        ),
+      );
+
   /// Stars the player is currently on track for, plus the move count.
   Widget _movesPill(double w) {
     final projected = starsFor(game.moves, _par);
@@ -316,10 +385,11 @@ class _GameScreenState extends State<GameScreen> with SingleTickerProviderStateM
       padding: EdgeInsets.symmetric(horizontal: w * 0.03),
       decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(w)),
       child: Row(mainAxisSize: MainAxisSize.min, children: [
-        if (widget.daily) ...[
-          Text('Daily', style: bodyStyle(w * 0.034, color: AppColors.red)),
-          SizedBox(width: w * 0.02),
-        ],
+        if (widget.daily)
+          Text('Daily', style: bodyStyle(w * 0.034, color: AppColors.red))
+        else
+          Text(difficultyOf(game.level).label, style: bodyStyle(w * 0.034, color: tierColor(difficultyOf(game.level)))),
+        SizedBox(width: w * 0.02),
         for (var i = 0; i < 3; i++) StarIcon(size: w * 0.045, filled: i < projected),
         SizedBox(width: w * 0.02),
         Text('Moves ${game.moves}', style: bodyStyle(w * 0.034)),

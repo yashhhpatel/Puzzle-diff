@@ -1,6 +1,8 @@
 import 'dart:math';
 import 'dart:ui';
 
+import 'picture_gen.dart';
+
 /// Gem colours used by the pixel pictures, keyed by the character in the
 /// picture strings.
 const Map<String, Color> kGemColors = {
@@ -315,6 +317,7 @@ const List<_Picture> _pictures = [
   ]),
 ];
 
+
 int get pictureCount => _pictures.length;
 
 List<String?> _parse(List<String> rows) {
@@ -327,60 +330,172 @@ List<String?> _parse(List<String> rows) {
   return out;
 }
 
-/// Builds the data for 1-based [level]. After the last hand-drawn picture the
-/// pictures repeat with fresh, harder scrambles.
+// ------------------------------------------------------------------ difficulty
+
+/// Total number of levels in the game.
+const int kMaxLevel = 1000;
+
+enum Difficulty { easy, medium, hard, veryHard }
+
+extension DifficultyInfo on Difficulty {
+  String get label => const ['Easy', 'Medium', 'Hard', 'Very Hard'][index];
+
+  /// First level of this tier.
+  int get firstLevel => const [1, 201, 501, 801][index];
+}
+
+/// Easy 1-200, Medium 201-500, Hard 501-800, Very Hard 801-1000.
+Difficulty difficultyOf(int level) {
+  if (level <= 200) return Difficulty.easy;
+  if (level <= 500) return Difficulty.medium;
+  if (level <= 800) return Difficulty.hard;
+  return Difficulty.veryHard;
+}
+
+/// Every 10th level is a hand-drawn "milestone" picture.
+bool isMilestone(int level) => level > 2 && level % 10 == 0;
+
+/// Smooth difficulty in 0..1. The base climbs steadily over all 1000 levels;
+/// a small saw-tooth makes each block of 10 open with a breather and build up
+/// to its milestone, so progress feels natural rather than a flat ramp.
+double difficultyCurve(int level) {
+  final t = (level.clamp(1, kMaxLevel) - 1) / (kMaxLevel - 1);
+  final base = pow(t, 0.85).toDouble();
+  final local = ((level - 1) % 10) / 9;
+  return (base + (local - 0.5) * 0.05).clamp(0.0, 1.0);
+}
+
+/// All the knobs for one level, derived from [difficultyCurve].
+class LevelSpec {
+  final int level;
+  final double effort;
+  final int cols, rows, colors, maxBlock;
+
+  /// Share of cells that start misplaced.
+  final double scramble;
+  const LevelSpec(this.level, this.effort, this.cols, this.rows, this.colors, this.maxBlock, this.scramble);
+}
+
+LevelSpec specFor(int level) {
+  final e = difficultyCurve(level);
+  final rnd = Random(level * 31337 + 11);
+  // Board grows from ~30 cells to ~160 cells.
+  final area = 30 + 130 * e;
+  final aspect = 0.85 + rnd.nextDouble() * 0.45; // rows / cols
+  final cols = sqrt(area / aspect).round().clamp(5, 12);
+  final rows = (area / cols).round().clamp(5, 14);
+  // 2-3 colours while learning, then 3 -> 6.
+  final colors = level < 5 ? 2 : (level < 10 ? 3 : (3 + e * 3.6).floor().clamp(3, 6));
+  // Smaller swap blocks mean more, smaller misplaced groups (more moves).
+  final maxBlock = e < 0.3 ? 4 : (e < 0.62 ? 3 : 2);
+  final scramble = 0.36 + 0.46 * e;
+  return LevelSpec(level, e, cols, rows, colors, maxBlock, scramble);
+}
+
+// ------------------------------------------------------------------ building
+
+final Map<int, LevelData> _cache = {};
+
+/// Builds the data for 1-based [level] (1..[kMaxLevel]); deterministic, so
+/// every player gets the same puzzle for the same level.
 LevelData buildLevel(int level) {
-  final pic = _pictures[(level - 1) % _pictures.length];
-  final rows = pic.rows.length;
-  final cols = pic.rows.first.length;
-  final target = _parse(pic.rows);
-  if (pic.start != null && level <= _pictures.length) {
-    return LevelData(cols, rows, target, _parse(pic.start!));
+  final cached = _cache[level];
+  if (cached != null) return cached;
+  final data = _buildLevel(level);
+  if (_cache.length > 8) _cache.remove(_cache.keys.first);
+  return _cache[level] = data;
+}
+
+LevelData _buildLevel(int level) {
+  // Levels 1 and 2 are the hand-made openers from the reference game.
+  if (level <= 2) {
+    final pic = _pictures[level - 1];
+    return LevelData(pic.rows.first.length, pic.rows.length, _parse(pic.rows), _parse(pic.start!));
   }
-  final loop = (level - 1) ~/ _pictures.length;
-  // Difficulty: share of misplaced gems grows with the level.
-  final frac = min(0.78, 0.42 + level * 0.015 + loop * 0.08);
-  return _scrambled(pic, level * 7919, frac);
+  final spec = specFor(level);
+  for (var pictureTry = 0; pictureTry < 20; pictureTry++) {
+    final rows = isMilestone(level) && pictureTry == 0
+        ? _milestonePicture(level)
+        : generatePicture(Random(level * 7919 + pictureTry * 15485863), spec.cols, spec.rows, spec.colors);
+    final built = _scrambled(rows, level * 104729 + pictureTry, spec.scramble, spec.maxBlock);
+    if (built != null) return built;
+  }
+  throw StateError('Could not build level $level');
 }
 
 /// The Daily Challenge for [day]: the same puzzle for every player that day,
-/// drawn from the regular pictures (never the tutorial) with a hard scramble.
+/// sized and scrambled like a Medium/Hard level.
 LevelData buildDaily(DateTime day) {
-  final days = DateTime.utc(day.year, day.month, day.day).difference(DateTime.utc(2024)).inDays;
-  final pic = _pictures[2 + days % (_pictures.length - 2)];
-  return _scrambled(pic, day.year * 10000 + day.month * 100 + day.day, 0.7);
+  final key = day.year * 10000 + day.month * 100 + day.day;
+  final rnd = Random(key);
+  final e = 0.5 + rnd.nextDouble() * 0.15;
+  final cols = 8 + rnd.nextInt(3), rows = 9 + rnd.nextInt(3);
+  final colors = (3 + e * 3.6).floor().clamp(3, 6);
+  for (var pictureTry = 0; pictureTry < 20; pictureTry++) {
+    final pic = generatePicture(Random(key * 31 + pictureTry), cols, rows, colors);
+    final built = _scrambled(pic, key * 7 + pictureTry, 0.36 + 0.46 * e, 3);
+    if (built != null) return built;
+  }
+  throw StateError('Could not build daily $key');
 }
 
-LevelData _scrambled(_Picture pic, int seed, double frac) {
-  final rows = pic.rows.length;
-  final cols = pic.rows.first.length;
-  final target = _parse(pic.rows);
-  for (var attempt = 0; attempt < 400; attempt++) {
+// Hand-drawn pictures (except the two openers), smallest first, so early
+// milestones are small boards.
+final List<int> _milestoneOrder = () {
+  final idx = List.generate(_pictures.length - 2, (i) => i + 2);
+  int area(int i) => _pictures[i].rows.length * _pictures[i].rows.first.length;
+  idx.sort((a, b) => area(a).compareTo(area(b)));
+  return idx;
+}();
+
+/// Milestone picture for [level]: each hand-drawn picture first appears in
+/// its original colours, then returns recoloured (and mirrored) later on.
+List<String> _milestonePicture(int level) {
+  final m = level ~/ 10 - 1;
+  final pic = _pictures[_milestoneOrder[m % _milestoneOrder.length]].rows;
+  final variant = m ~/ _milestoneOrder.length;
+  if (variant == 0) return pic;
+  // Most frequent colour becomes the new background, and so on.
+  final counts = <String, int>{};
+  for (final r in pic) {
+    for (final ch in r.split('')) {
+      if (ch != '.') counts[ch] = (counts[ch] ?? 0) + 1;
+    }
+  }
+  final keys = counts.keys.toList()..sort((a, b) => counts[b]!.compareTo(counts[a]!));
+  final pal = kPalettes[(m * 7 + variant) % kPalettes.length];
+  final map = {for (var i = 0; i < keys.length; i++) keys[i]: pal[i % pal.length]};
+  return [
+    for (final r in pic)
+      (variant.isOdd ? r.split('').reversed : r.split('')).map((ch) => ch == '.' ? '.' : map[ch]!).join(),
+  ];
+}
+
+/// Scrambles [rows] until the greedy solver can finish it; null if this
+/// picture refuses to produce a fair puzzle.
+LevelData? _scrambled(List<String> rows, int seed, double frac, int maxBlock) {
+  final r = rows.length;
+  final c = rows.first.length;
+  final target = _parse(rows);
+  for (var attempt = 0; attempt < 120; attempt++) {
     final rnd = Random(seed + attempt * 104729);
-    final start = _scramble(cols, rows, target, rnd, frac);
-    if (start != null && solvableGreedy(cols, rows, target, start, 12)) {
-      return LevelData(cols, rows, target, start);
+    // Ease off slightly if a picture keeps producing dead ends.
+    final f = max(0.3, frac - (attempt ~/ 30) * 0.04);
+    final start = _scramble(c, r, target, rnd, f, maxBlock);
+    if (start != null && solvableGreedy(c, r, target, start, 12)) {
+      return LevelData(c, r, target, start);
     }
   }
-  // Fallback that is always solvable: swap the two halves of the picture.
-  final start = List<String?>.from(target);
-  for (var i = 0; i < start.length ~/ 2; i++) {
-    final j = start.length - 1 - i;
-    if (target[i] != null && target[j] != null) {
-      final t = start[i];
-      start[i] = start[j];
-      start[j] = t;
-    }
-  }
-  return LevelData(cols, rows, target, start);
+  return null;
 }
 
 /// Swaps equally-sized rectangular blocks so misplaced gems form chunky
 /// groups, like the reference game.
-List<String?>? _scramble(int cols, int rows, List<String?> target, Random rnd, double frac) {
+List<String?>? _scramble(int cols, int rows, List<String?> target, Random rnd, double frac, int maxBlock) {
   final g = List<String?>.from(target);
   final cellCount = target.where((t) => t != null).length;
-  int wrong() {
+  var wrongNow = 0;
+  int countWrong() {
     var n = 0;
     for (var i = 0; i < g.length; i++) {
       if (g[i] != null && g[i] != target[i]) n++;
@@ -389,10 +504,10 @@ List<String?>? _scramble(int cols, int rows, List<String?> target, Random rnd, d
   }
 
   var tries = 0;
-  while (wrong() < cellCount * frac && tries < 3000) {
+  while (wrongNow < cellCount * frac && tries < 3000) {
     tries++;
-    final w = 1 + rnd.nextInt(min(4, cols));
-    final h = 1 + rnd.nextInt(min(4, rows));
+    final w = 1 + rnd.nextInt(min(maxBlock, cols));
+    final h = 1 + rnd.nextInt(min(maxBlock, rows));
     final ax = rnd.nextInt(cols - w + 1), ay = rnd.nextInt(rows - h + 1);
     final bx = rnd.nextInt(cols - w + 1), by = rnd.nextInt(rows - h + 1);
     final overlap = ax < bx + w && bx < ax + w && ay < by + h && by < ay + h;
@@ -407,7 +522,6 @@ List<String?>? _scramble(int cols, int rows, List<String?> target, Random rnd, d
       }
     }
     if (!ok) continue;
-    final before = wrong();
     final saved = List<String?>.from(g);
     for (var y = 0; y < h; y++) {
       for (var x = 0; x < w; x++) {
@@ -417,66 +531,71 @@ List<String?>? _scramble(int cols, int rows, List<String?> target, Random rnd, d
         g[b] = t;
       }
     }
-    if (wrong() <= before) g.setAll(0, saved);
+    final after = countWrong();
+    if (after <= wrongNow) {
+      g.setAll(0, saved);
+    } else {
+      wrongNow = after;
+    }
   }
-  return wrong() >= cellCount * frac * 0.9 ? g : null;
+  return wrongNow >= cellCount * frac * 0.9 && wrongNow > 0 ? g : null;
 }
 
-/// Greedy playthrough used to reject scrambles that could dead-end.
+/// Greedy playthrough used to reject scrambles that could dead-end: place
+/// everything that has a free home, otherwise park the most useful group on
+/// the shelf. Mirrors what a player can do with taps.
 bool solvableGreedy(int cols, int rows, List<String?> target, List<String?> start, int shelfSize) {
+  final n = start.length;
   final g = List<String?>.from(start);
   final shelf = <String>[];
-  bool isWrong(int i) => g[i] != null && g[i] != target[i];
-  List<int> neighbours(int i) {
-    final x = i % cols, y = i ~/ cols;
-    return [
-      if (x > 0) i - 1,
-      if (x < cols - 1) i + 1,
-      if (y > 0) i - cols,
-      if (y < rows - 1) i + cols,
-    ];
+  final empty = <String, List<int>>{};
+  for (var i = 0; i < n; i++) {
+    if (target[i] != null && g[i] == null) (empty[target[i]!] ??= []).add(i);
   }
+  bool isWrong(int i) => g[i] != null && g[i] != target[i];
+  final seen = List<int>.filled(n, -1);
+  var mark = 0;
 
-  for (var step = 0; step < 2000; step++) {
-    if (!List.generate(g.length, (i) => i).any(isWrong) && shelf.isEmpty) return true;
+  for (var step = 0; step < 5000; step++) {
     var progressed = false;
-    // Place anything that has a free home.
-    for (var i = 0; i < g.length; i++) {
-      if (!isWrong(i)) continue;
-      final c = g[i]!;
-      final free = List.generate(g.length, (j) => j).where((j) => g[j] == null && target[j] == c);
-      if (free.isNotEmpty) {
-        g[free.first] = c;
-        g[i] = null;
+    for (var s = shelf.length - 1; s >= 0; s--) {
+      final free = empty[shelf[s]];
+      if (free != null && free.isNotEmpty) {
+        g[free.removeLast()] = shelf.removeAt(s);
         progressed = true;
       }
     }
-    for (var s = shelf.length - 1; s >= 0; s--) {
-      final c = shelf[s];
-      final free = List.generate(g.length, (j) => j).where((j) => g[j] == null && target[j] == c);
-      if (free.isNotEmpty) {
-        g[free.first] = c;
-        shelf.removeAt(s);
+    var anyWrong = false;
+    for (var i = 0; i < n; i++) {
+      if (!isWrong(i)) continue;
+      final free = empty[g[i]!];
+      if (free != null && free.isNotEmpty) {
+        g[free.removeLast()] = g[i];
+        g[i] = null;
+        (empty[target[i]!] ??= []).add(i);
         progressed = true;
+      } else {
+        anyWrong = true;
       }
     }
     if (progressed) continue;
-    if (shelf.length >= shelfSize) return false;
-    // Move the most useful wrong group to the shelf: one sitting on cells the
-    // shelf colours need, otherwise the smallest group.
-    final seen = <int>{};
+    if (!anyWrong && shelf.isEmpty) return true;
+    if (shelf.length >= shelfSize || !anyWrong) return false;
+    // Park the group that frees cells the shelf colours need, else the smallest.
+    final need = shelf.toSet();
     List<int>? best;
     var bestScore = -1e9;
-    final need = shelf.toSet();
-    for (var i = 0; i < g.length; i++) {
-      if (!isWrong(i) || seen.contains(i)) continue;
+    mark++;
+    for (var i = 0; i < n; i++) {
+      if (!isWrong(i) || seen[i] == mark) continue;
       final grp = <int>[i];
-      seen.add(i);
+      seen[i] = mark;
       for (var k = 0; k < grp.length; k++) {
-        for (final n in neighbours(grp[k])) {
-          if (!seen.contains(n) && isWrong(n) && g[n] == g[i]) {
-            seen.add(n);
-            grp.add(n);
+        final p = grp[k], x = p % cols, y = p ~/ cols;
+        for (final q in [if (x > 0) p - 1, if (x < cols - 1) p + 1, if (y > 0) p - cols, if (y < rows - 1) p + cols]) {
+          if (seen[q] != mark && isWrong(q) && g[q] == g[i]) {
+            seen[q] = mark;
+            grp.add(q);
           }
         }
       }
@@ -487,11 +606,11 @@ bool solvableGreedy(int cols, int rows, List<String?> target, List<String?> star
         best = grp;
       }
     }
-    if (best == null) return false;
-    for (final i in best) {
+    for (final i in best!) {
       if (shelf.length >= shelfSize) break;
       shelf.add(g[i]!);
       g[i] = null;
+      (empty[target[i]!] ??= []).add(i);
     }
   }
   return false;

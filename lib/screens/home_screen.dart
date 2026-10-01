@@ -7,6 +7,7 @@ import 'package:flutter/services.dart';
 import '../config.dart';
 import '../game/autoplay.dart';
 import '../game/gem_art.dart';
+import '../levels.dart';
 import '../services.dart';
 import '../theme.dart';
 import '../widgets.dart';
@@ -46,8 +47,10 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   void _play({bool daily = false}) {
+    // After level 1000, Play replays a random Very Hard level.
+    final replay = !daily && Progress.I.level > kMaxLevel ? 801 + Random().nextInt(kMaxLevel - 800) : null;
     Navigator.of(context).pushReplacement(PageRouteBuilder(
-      pageBuilder: (_, __, ___) => GameScreen(daily: daily),
+      pageBuilder: (_, __, ___) => GameScreen(daily: daily, replay: replay),
       transitionsBuilder: (_, a, __, child) => FadeTransition(opacity: a, child: child),
     ));
   }
@@ -73,6 +76,7 @@ class _HomeScreenState extends State<HomeScreen> {
     final w = size.width, h = size.height;
     final u = min(w, h * 0.56);
     final p = Progress.I;
+    final allDone = p.level > kMaxLevel;
     return Scaffold(
       body: PatternBackground(
         child: SafeArea(
@@ -96,8 +100,9 @@ class _HomeScreenState extends State<HomeScreen> {
               whiteBorder: true,
               onTap: _play,
               child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-                buttonLabel('Play', u * 0.085),
-                Text('Level ${p.level}', style: bodyStyle(u * 0.04, color: Colors.white.withAlpha(230))),
+                buttonLabel(allDone ? 'Replay' : 'Play', u * 0.085),
+                Text(allDone ? 'All $kMaxLevel levels done!' : 'Level ${p.level} · ${difficultyOf(p.level).label}',
+                    style: bodyStyle(u * 0.04, color: Colors.white.withAlpha(230))),
               ]),
             ),
             SizedBox(height: u * 0.06),
