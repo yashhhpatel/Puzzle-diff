@@ -1,4 +1,4 @@
-# Diamond Picture Puzzle
+# Jewel Sort: Diamond Pixel Art
 
 A new Flutter project.
 

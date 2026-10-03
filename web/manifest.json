@@ -1,6 +1,6 @@
 {
-    "name": "Diamond Picture Puzzle",
-    "short_name": "Diamond Puzzle",
+    "name": "Jewel Sort: Diamond Pixel Art",
+    "short_name": "Jewel Sort",
     "start_url": ".",
     "display": "standalone",
     "background_color": "#0175C2",

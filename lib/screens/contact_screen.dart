@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../ads.dart';
 import '../config.dart';
 import '../services.dart';
 import '../theme.dart';
@@ -21,6 +22,7 @@ Future<void> openPrivacyPolicy(BuildContext context) async {
     _snack(context, 'Privacy policy coming soon.');
     return;
   }
+  Ads.I.quietNextResume();
   final ok = await launchUrl(Uri.parse(kPrivacyPolicyUrl), mode: LaunchMode.externalApplication).catchError((_) => false);
   if (!ok && context.mounted) _snack(context, 'Could not open the browser.');
 }
@@ -40,11 +42,11 @@ class LegalLinks extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final style = bodyStyle(unit * 0.036, color: color, weight: 700).copyWith(decoration: TextDecoration.underline, decorationColor: color);
-    return Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+    return FittedBox(fit: BoxFit.scaleDown, child: Row(mainAxisSize: MainAxisSize.min, children: [
       Pressable(onTap: () => openPrivacyPolicy(context), child: Text('Privacy Policy', style: style)),
       Text('   •   ', style: bodyStyle(unit * 0.036, color: color)),
       Pressable(onTap: () => openContact(context), child: Text('Contact Us', style: style)),
-    ]);
+    ]));
   }
 }
 
@@ -71,9 +73,10 @@ class ContactScreen extends StatelessWidget {
       path: kSupportEmail,
       // Uri encodes spaces as '+' in queryParameters, which mail apps show
       // literally, so build the query by hand.
-      query: 'subject=${Uri.encodeComponent('[Diamond Picture Puzzle] $subject')}'
+      query: 'subject=${Uri.encodeComponent('[Jewel Sort] $subject')}'
           '&body=${Uri.encodeComponent('\n\n---\nApp version: 1.0.0\nLevel: ${Progress.I.level}')}',
     );
+    Ads.I.quietNextResume();
     final ok = await launchUrl(uri).catchError((_) => false);
     if (!ok && context.mounted) {
       await Clipboard.setData(const ClipboardData(text: kSupportEmail));

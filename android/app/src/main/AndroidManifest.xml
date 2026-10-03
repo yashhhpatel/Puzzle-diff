@@ -1,7 +1,7 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-permission android:name="android.permission.INTERNET" />
     <application
-        android:label="Diamond Picture Puzzle"
+        android:label="Jewel Sort: Diamond Pixel Art"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
         <!-- AdMob app ID. This is Google's test ID: replace with your own before release. -->

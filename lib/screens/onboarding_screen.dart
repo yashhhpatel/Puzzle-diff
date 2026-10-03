@@ -31,7 +31,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> with SingleTickerPr
   Duration? _last;
 
   late final List<_Page> _pages = [
-    _Page('Welcome to Diamond Picture Puzzle', 'Sort sparkling diamonds into place and reveal a pixel picture in every level.',
+    _Page('Welcome to Jewel Sort', 'Sort sparkling diamonds into place and reveal a pixel picture in every level.',
         (t) => _WelcomeArt(t)),
     _Page('Tap, park & place', 'Tap a group of same-colour diamonds, park them on the shelf, then tap the matching cells.',
         (t) => _HowToArt(t)),

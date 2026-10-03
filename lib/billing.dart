@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:in_app_purchase/in_app_purchase.dart';
 
+import 'ads.dart';
 import 'config.dart';
 import 'services.dart';
 
@@ -71,6 +72,8 @@ class Billing extends ChangeNotifier {
       return;
     }
     _set(PurchaseUiState.paying);
+    // The Play purchase sheet pauses the app; returning isn't an "app open".
+    Ads.I.quietNextResume();
     final param = PurchaseParam(productDetails: details);
     try {
       final started = id == StoreConfig.removeAds

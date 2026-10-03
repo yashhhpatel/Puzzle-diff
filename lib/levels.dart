@@ -332,37 +332,45 @@ List<String?> _parse(List<String> rows) {
 
 // ------------------------------------------------------------------ difficulty
 
-/// Total number of levels in the game.
-const int kMaxLevel = 1000;
+/// Levels are unlimited. The four main tiers span the first 1000 levels;
+/// after that the Master tier keeps getting slowly harder forever.
+const int kMasterStart = 1001;
 
-enum Difficulty { easy, medium, hard, veryHard }
+enum Difficulty { easy, medium, hard, veryHard, master }
 
 extension DifficultyInfo on Difficulty {
-  String get label => const ['Easy', 'Medium', 'Hard', 'Very Hard'][index];
+  String get label => const ['Easy', 'Medium', 'Hard', 'Very Hard', 'Master'][index];
 
   /// First level of this tier.
-  int get firstLevel => const [1, 201, 501, 801][index];
+  int get firstLevel => const [1, 201, 501, 801, kMasterStart][index];
 }
 
-/// Easy 1-200, Medium 201-500, Hard 501-800, Very Hard 801-1000.
+/// Easy 1-200, Medium 201-500, Hard 501-800, Very Hard 801-1000, Master 1001+.
 Difficulty difficultyOf(int level) {
   if (level <= 200) return Difficulty.easy;
   if (level <= 500) return Difficulty.medium;
   if (level <= 800) return Difficulty.hard;
-  return Difficulty.veryHard;
+  if (level < kMasterStart) return Difficulty.veryHard;
+  return Difficulty.master;
 }
 
 /// Every 10th level is a hand-drawn "milestone" picture.
 bool isMilestone(int level) => level > 2 && level % 10 == 0;
 
-/// Smooth difficulty in 0..1. The base climbs steadily over all 1000 levels;
+/// Smooth difficulty: 0..1 over the first 1000 levels, then creeping towards
+/// 1.25 in the endless Master tier. The base climbs steadily;
 /// a small saw-tooth makes each block of 10 open with a breather and build up
 /// to its milestone, so progress feels natural rather than a flat ramp.
 double difficultyCurve(int level) {
-  final t = (level.clamp(1, kMaxLevel) - 1) / (kMaxLevel - 1);
-  final base = pow(t, 0.85).toDouble();
+  final double base;
+  if (level < kMasterStart) {
+    base = pow((max(1, level) - 1) / (kMasterStart - 2), 0.85).toDouble();
+  } else {
+    // Every Master level is a bit harder than the last, never jumping.
+    base = 1 + 0.25 * (1 - exp(-(level - kMasterStart + 1) / 1500));
+  }
   final local = ((level - 1) % 10) / 9;
-  return (base + (local - 0.5) * 0.05).clamp(0.0, 1.0);
+  return max(0.0, base + (local - 0.5) * 0.05);
 }
 
 /// All the knobs for one level, derived from [difficultyCurve].
@@ -388,7 +396,7 @@ LevelSpec specFor(int level) {
   final colors = level < 5 ? 2 : (level < 10 ? 3 : (3 + e * 3.6).floor().clamp(3, 6));
   // Smaller swap blocks mean more, smaller misplaced groups (more moves).
   final maxBlock = e < 0.3 ? 4 : (e < 0.62 ? 3 : 2);
-  final scramble = 0.36 + 0.46 * e;
+  final scramble = min(0.9, 0.36 + 0.46 * e);
   return LevelSpec(level, e, cols, rows, colors, maxBlock, scramble);
 }
 
@@ -396,7 +404,7 @@ LevelSpec specFor(int level) {
 
 final Map<int, LevelData> _cache = {};
 
-/// Builds the data for 1-based [level] (1..[kMaxLevel]); deterministic, so
+/// Builds the data for 1-based [level] (unlimited); deterministic, so
 /// every player gets the same puzzle for the same level.
 LevelData buildLevel(int level) {
   final cached = _cache[level];

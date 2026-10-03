@@ -45,6 +45,8 @@ class _LoadingScreenState extends State<LoadingScreen> with SingleTickerProvider
     if (!mounted) return;
     await _c.animateTo(1, duration: const Duration(milliseconds: 900), curve: Curves.easeInOut);
     await Future.delayed(const Duration(milliseconds: 350));
+    // App Open ad on returning launches (never the first one after install).
+    await Ads.I.showAppOpenOnLaunch();
     if (!mounted || _ready) return;
     _ready = true;
     Navigator.of(context).pushReplacement(PageRouteBuilder(

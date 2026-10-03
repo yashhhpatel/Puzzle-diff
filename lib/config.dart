@@ -1,5 +1,5 @@
 /// Support address used by the Contact Us page.
-const kSupportEmail = 'aakashmangukiya10@gmail.com';
+const kSupportEmail = 'anjalisasani10@gmail.com';
 
 /// Public privacy policy page (also enter it in Play Console > App content).
 const kPrivacyPolicyUrl = 'https://api.buildprivacypolicy.com/policy/56b2f7da-e487-4bf6-8ab5-ac6d8e3ca0ce';
@@ -42,6 +42,12 @@ class AdConfig {
   // Google's official test IDs. Also replace the APPLICATION_ID meta-data in
   // android/app/src/main/AndroidManifest.xml when switching to real IDs.
   static const androidInterstitial = 'ca-app-pub-3940256099942544/1033173712';
+  static const androidBanner = 'ca-app-pub-3940256099942544/9214589741'; // adaptive banner
+  static const androidAppOpen = 'ca-app-pub-3940256099942544/9257395921';
+  static const androidRewarded = 'ca-app-pub-3940256099942544/5224354917';
+
+  /// App Open ads expire after this long (Google's guidance: 4 hours).
+  static const appOpenMaxAge = Duration(hours: 4);
 
   /// An interstitial follows every Nth completed level.
   static const levelsPerInterstitial = 2;

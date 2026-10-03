@@ -21,10 +21,11 @@ class _Stats {
 
 void main() {
   test('all 1000 levels are valid, solvable, and get harder tier by tier', () {
-    final tiers = {for (final d in Difficulty.values) d: _Stats()};
+    const mainTiers = [Difficulty.easy, Difficulty.medium, Difficulty.hard, Difficulty.veryHard];
+    final tiers = {for (final d in mainTiers) d: _Stats()};
     final blocks = List.generate(10, (_) => _Stats());
     final seen = <String>{};
-    for (var level = 1; level <= kMaxLevel; level++) {
+    for (var level = 1; level <= 1000; level++) {
       final d = buildLevel(level);
       expect(d.target.length, d.cols * d.rows, reason: 'level $level size');
       expect(d.cols, lessThanOrEqualTo(12));
@@ -49,7 +50,7 @@ void main() {
       tiers[difficultyOf(level)]!.add(cells.toDouble(), want.length.toDouble(), wrong / cells, par.toDouble());
       blocks[(level - 1) ~/ 100].add(cells.toDouble(), want.length.toDouble(), wrong / cells, par.toDouble());
     }
-    for (final d in Difficulty.values) {
+    for (final d in mainTiers) {
       // ignore: avoid_print
       print(tiers[d]!.row(d.label));
     }
@@ -58,7 +59,7 @@ void main() {
       print(blocks[b].row('levels ${b * 100 + 1}-${b * 100 + 100}'));
     }
     // Each tier is harder than the one before on every measure.
-    final t = Difficulty.values.map((d) => tiers[d]!).toList();
+    final t = mainTiers.map((d) => tiers[d]!).toList();
     for (var i = 1; i < t.length; i++) {
       expect(t[i].cells / t[i].n, greaterThan(t[i - 1].cells / t[i - 1].n));
       expect(t[i].colors / t[i].n, greaterThan(t[i - 1].colors / t[i - 1].n));

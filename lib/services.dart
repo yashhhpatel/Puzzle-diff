@@ -16,6 +16,9 @@ class Progress extends ChangeNotifier {
   bool onboarded = false;
   bool adsFree = false;
 
+  /// Number of cold starts, including this one (1 on the first launch).
+  int launchCount = 0;
+
   /// Best star rating per completed level.
   Map<int, int> stars = {};
 
@@ -46,6 +49,8 @@ class Progress extends ChangeNotifier {
           if (e.contains(':')) int.parse(e.split(':')[0]): int.parse(e.split(':')[1]),
       };
       grantedPurchases = _p!.getStringList('granted') ?? [];
+      launchCount = (_p!.getInt('launchCount') ?? 0) + 1;
+      _p!.setInt('launchCount', launchCount);
     } catch (_) {}
   }
 
@@ -91,14 +96,49 @@ class Sfx {
 
   static const _names = ['pick', 'drop', 'shelf', 'sparkle', 'complete', 'coin', 'click', 'error', 'whoosh'];
 
+  // Every audioplayers player requests full audio focus by default, so each
+  // sound effect used to take focus from the music, which then stopped for
+  // good. Effects now mix in without touching focus; only the music holds it.
+  static final _sfxContext = AudioContext(
+    android: const AudioContextAndroid(
+      audioFocus: AndroidAudioFocus.none,
+      usageType: AndroidUsageType.game,
+      contentType: AndroidContentType.sonification,
+    ),
+    // Ambient already mixes with other audio on iOS.
+    iOS: AudioContextIOS(category: AVAudioSessionCategory.ambient),
+  );
+  static final _musicContext = AudioContext(
+    android: const AudioContextAndroid(
+      audioFocus: AndroidAudioFocus.gain,
+      usageType: AndroidUsageType.game,
+      contentType: AndroidContentType.music,
+    ),
+    // Ambient already mixes with other audio on iOS.
+    iOS: AudioContextIOS(category: AVAudioSessionCategory.ambient),
+  );
+
   Future<void> init() async {
+    // Music first, so it starts as soon as the game opens.
     try {
-      for (final n in _names) {
+      final m = AudioPlayer();
+      await m.setAudioContext(_musicContext);
+      await m.setReleaseMode(ReleaseMode.loop);
+      await m.setVolume(0.35);
+      await m.setSource(AssetSource('sfx/music.wav'));
+      _music = m;
+      updateMusic();
+    } catch (e) {
+      debugPrint('music init failed: $e');
+    }
+    for (final n in _names) {
+      try {
         // Android caps AudioTracks per app, so keep the pools small.
         final count = (n == 'drop' || n == 'coin') ? 2 : 1;
         final list = <AudioPlayer>[];
         for (var i = 0; i < count; i++) {
           final p = AudioPlayer();
+          await p.setAudioContext(_sfxContext);
           await p.setPlayerMode(PlayerMode.lowLatency);
           await p.setReleaseMode(ReleaseMode.stop);
           await p.setSource(AssetSource('sfx/$n.wav'));
@@ -106,16 +146,14 @@ class Sfx {
         }
         _pools[n] = list;
         _next[n] = 0;
+      } catch (e) {
+        debugPrint('sfx $n init failed: $e');
       }
-      _music = AudioPlayer();
-      await _music!.setReleaseMode(ReleaseMode.loop);
-      await _music!.setVolume(0.35);
-      await _music!.setSource(AssetSource('sfx/music.wav'));
-    } catch (e) {
-      debugPrint('audio init failed: $e');
     }
-    updateMusic();
   }
+
+  /// True while the background music is actually playing (for diagnostics).
+  bool get musicPlaying => _music?.state == PlayerState.playing;
 
   void play(String name) {
     if (!Progress.I.sound) return;
@@ -135,7 +173,7 @@ class Sfx {
     final m = _music;
     if (m == null) return;
     if (Progress.I.music) {
-      m.resume().catchError((_) {});
+      m.resume().catchError((Object e) => debugPrint('music resume failed: $e'));
     } else {
       m.pause().catchError((_) {});
     }

@@ -36,7 +36,7 @@ class GameScreen extends StatefulWidget {
   State<GameScreen> createState() => _GameScreenState();
 }
 
-class _GameScreenState extends State<GameScreen> with SingleTickerProviderStateMixin {
+class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
   late GameController game;
   late final Ticker _ticker;
   final _frame = ValueNotifier<int>(0);
@@ -52,12 +52,22 @@ class _GameScreenState extends State<GameScreen> with SingleTickerProviderStateM
   Timer? _autoTimer;
   int _par = 1;
   Difficulty? _tierBanner;
+
+  // Board zoom / pan (pinch to zoom, drag to pan while zoomed).
+  double _zoom = 1;
+  Offset _pan = Offset.zero;
+  double _gStartZoom = 1;
+  Offset _gBoardPoint = Offset.zero;
+  late final AnimationController _zoomReset = AnimationController(vsync: this, duration: const Duration(milliseconds: 280));
+  double _resetFromZoom = 1;
+  Offset _resetFromPan = Offset.zero;
   int _stars = 3;
 
   @override
   void initState() {
     super.initState();
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+    _zoomReset.addListener(_onZoomResetTick);
     _startLevel();
     if (kAutoplay) {
       _autoTimer = Timer.periodic(const Duration(milliseconds: 380), (_) {
@@ -73,7 +83,7 @@ class _GameScreenState extends State<GameScreen> with SingleTickerProviderStateM
 
   void _startLevel() {
     final now = DateTime.now();
-    final lvl = widget.daily ? 0 : (widget.replay ?? Progress.I.level.clamp(1, kMaxLevel));
+    final lvl = widget.daily ? 0 : (widget.replay ?? Progress.I.level);
     // Announce a new difficulty tier on its first level.
     final tier = difficultyOf(lvl);
     if (!widget.daily && widget.replay == null && lvl > 1 && lvl == tier.firstLevel) {
@@ -94,6 +104,9 @@ class _GameScreenState extends State<GameScreen> with SingleTickerProviderStateM
             if (mounted) setState(() => _popup = _Popup.deadlock);
           });
     game.addListener(_onGame);
+    _zoomReset.stop();
+    _zoom = 1;
+    _pan = Offset.zero;
     if (kAutoplay) debugPrint('AUTOPLAY start level $lvl');
     _complete = false;
     _shownCoins = Progress.I.coins;
@@ -118,6 +131,7 @@ class _GameScreenState extends State<GameScreen> with SingleTickerProviderStateM
   @override
   void dispose() {
     _ticker.dispose();
+    _zoomReset.dispose();
     _autoTimer?.cancel();
     _tooltipTimer?.cancel();
     _toastTimer?.cancel();
@@ -132,25 +146,19 @@ class _GameScreenState extends State<GameScreen> with SingleTickerProviderStateM
     if (widget.daily) {
       Progress.I.dailyDone = Progress.dateKey(DateTime.now());
       Progress.I.save();
-      _goHome();
-    } else if (widget.replay != null || game.level >= kMaxLevel) {
-      // Replays don't advance; finishing level 1000 completes the game.
-      if (game.level >= kMaxLevel && Progress.I.level <= kMaxLevel) {
-        Progress.I.level = kMaxLevel + 1;
-        Progress.I.save();
-      }
-      _finishToHome(game.level);
+      _finishDaily();
     } else {
       _nextLevel(game.level);
     }
   }
 
-  Future<void> _finishToHome(int completed) async {
+  /// Daily Challenge done: interstitial (unless Remove Ads), then Home.
+  Future<void> _finishDaily() async {
     setState(() {
       _complete = false;
       _loading = true;
     });
-    await Ads.I.afterLevel(completed);
+    await Ads.I.showInterstitial();
     if (mounted) _goHome();
   }
 
@@ -172,7 +180,7 @@ class _GameScreenState extends State<GameScreen> with SingleTickerProviderStateM
     // Generate the next puzzle (and its par) behind the loading screen; both
     // are cached, so _startLevel below is instant.
     await Future.delayed(const Duration(milliseconds: 60));
-    final next = Progress.I.level.clamp(1, kMaxLevel);
+    final next = Progress.I.level;
     parMoves('L$next', buildLevel(next), tutorial: next == 1);
     // Interstitial (every 2nd level, unless Remove Ads) plays over the loading
     // screen; the next level is only built once it has been closed.
@@ -214,15 +222,8 @@ class _GameScreenState extends State<GameScreen> with SingleTickerProviderStateM
     final kind = _boosterKinds[i];
     final have = Progress.I.boosters[kind]!;
     if (have <= 0) {
-      if (Progress.I.coins >= 100) {
-        Progress.I.coins -= 100;
-        Progress.I.boosters[kind] = 1;
-        Progress.I.save();
-        setState(() => _shownCoins = Progress.I.coins);
-      } else {
-        _openShop();
-        return;
-      }
+      _earnBoosterWithAd(kind);
+      return;
     }
     final used = switch (kind) { 'wand' => game.useWand(), 'broom' => game.useBroom(), _ => game.useMagnet() };
     if (used) {
@@ -232,6 +233,33 @@ class _GameScreenState extends State<GameScreen> with SingleTickerProviderStateM
       setState(() {});
     }
   }
+
+  bool _watchingAd = false;
+
+  /// The "+" on an empty booster: watch a rewarded ad, get 1 of that booster.
+  Future<void> _earnBoosterWithAd(String kind) async {
+    if (_watchingAd || game.busy) return;
+    if (!Ads.I.rewardedReady) {
+      Ads.I.preloadRewarded();
+      _showToast('No video available right now. Please try again in a moment.');
+      return;
+    }
+    _watchingAd = true;
+    final earned = await Ads.I.showRewarded();
+    _watchingAd = false;
+    if (!mounted) return;
+    if (earned) {
+      Progress.I.boosters[kind] = Progress.I.boosters[kind]! + 1;
+      Progress.I.save();
+      Sfx.I.play('coin');
+      _showToast('+1 ${_boosterNames[kind]}! Tap it to use.');
+    } else {
+      _showToast('Watch the whole video to get the booster.');
+    }
+    setState(() {});
+  }
+
+  static const _boosterNames = {'wand': 'Magic Wand', 'broom': 'Broom', 'magnet': 'Magnet'};
 
   Future<void> _openShop() async {
     await Navigator.of(context).push(PageRouteBuilder(
@@ -253,20 +281,26 @@ class _GameScreenState extends State<GameScreen> with SingleTickerProviderStateM
       },
       child: Scaffold(
         backgroundColor: AppColors.gameBg,
-        body: SafeArea(child: LayoutBuilder(builder: (context, box) {
+        // Game area on top, adaptive anchored banner pinned edge to edge below.
+        body: Column(children: [
+          Expanded(child: SafeArea(bottom: false, child: LayoutBuilder(builder: (context, box) {
           final size = box.biggest;
           final w = size.width, h = size.height;
-          final layout = GameLayout(size, game.cols, game.rows);
+          final layout = GameLayout(size, game.cols, game.rows, zoom: _zoom, pan: _pan);
           final dim = _popup != _Popup.none || _complete;
           return Stack(children: [
             // Board + shelf canvas with its own hit testing.
             Positioned.fill(
               child: GestureDetector(
                 behavior: HitTestBehavior.opaque,
-                onTapDown: (d) => _onTap(d.localPosition, layout),
+                // Taps fire on release so a pinch is never mistaken for a tap.
+                onTapUp: (d) => _onTap(d.localPosition, layout),
+                onScaleStart: (d) => _onScaleStart(d, size),
+                onScaleUpdate: (d) => _onScaleUpdate(d, size),
                 child: CustomPaint(painter: BoardPainter(game, layout, _frame)),
               ),
             ),
+            if (_zoom > 1.01 && !_boardBlocked) _zoomButton(w, h),
             if (game.tutorial != null) _tutorialBox(w, h),
             _boosters(w, h),
             if (game.tutorial != null && !game.busy) _hand(layout, w),
@@ -290,10 +324,78 @@ class _GameScreenState extends State<GameScreen> with SingleTickerProviderStateM
             if (_loading) const Positioned.fill(child: LevelLoading()),
             if (_toast != null) _toastView(w, h),
           ]);
-        })),
+          }))),
+          const AdBanner(),
+        ]),
       ),
     );
   }
+
+  bool get _boardBlocked => _popup != _Popup.none || _complete || _loading;
+
+  void _onScaleStart(ScaleStartDetails d, Size size) {
+    if (_boardBlocked) return;
+    _zoomReset.stop();
+    final l = GameLayout(size, game.cols, game.rows, zoom: _zoom, pan: _pan);
+    _gStartZoom = _zoom;
+    // Board point under the fingers stays under them while zooming.
+    _gBoardPoint = (d.localFocalPoint - l.boardOrigin) / l.cell;
+  }
+
+  void _onScaleUpdate(ScaleUpdateDetails d, Size size) {
+    if (_boardBlocked) return;
+    final base = GameLayout(size, game.cols, game.rows);
+    final z = (_gStartZoom * d.scale).clamp(1.0, base.maxZoom);
+    if (z <= 1.001) {
+      if (_zoom != 1 || _pan != Offset.zero) {
+        setState(() {
+          _zoom = 1;
+          _pan = Offset.zero;
+        });
+      }
+      return;
+    }
+    final centred = GameLayout(size, game.cols, game.rows, zoom: z);
+    final wanted = d.localFocalPoint - _gBoardPoint * centred.cell;
+    final pan = centred.clampPan(wanted - centred.boardOrigin, z);
+    setState(() {
+      _zoom = z;
+      _pan = pan;
+    });
+  }
+
+  /// Smoothly returns the board to its fitted size.
+  void _resetZoom() {
+    _resetFromZoom = _zoom;
+    _resetFromPan = _pan;
+    _zoomReset.forward(from: 0);
+  }
+
+  void _onZoomResetTick() {
+    final t = Curves.easeOutCubic.transform(_zoomReset.value);
+    setState(() {
+      _zoom = _resetFromZoom + (1 - _resetFromZoom) * t;
+      _pan = Offset.lerp(_resetFromPan, Offset.zero, t)!;
+    });
+  }
+
+  Widget _zoomButton(double w, double h) => Positioned(
+        right: w * 0.04,
+        top: h * 0.125,
+        child: Pressable(
+          onTap: _resetZoom,
+          child: Container(
+            width: w * 0.11,
+            height: w * 0.11,
+            decoration: BoxDecoration(
+              color: Colors.white,
+              shape: BoxShape.circle,
+              boxShadow: [BoxShadow(color: Colors.black.withAlpha(40), blurRadius: 6, offset: const Offset(0, 2))],
+            ),
+            child: Icon(Icons.zoom_out_map_rounded, color: AppColors.lavenderDark, size: w * 0.065),
+          ),
+        ),
+      );
 
   void _onTap(Offset p, GameLayout layout) {
     if (_popup != _Popup.none || _complete || _loading) return;
@@ -347,6 +449,7 @@ class _GameScreenState extends State<GameScreen> with SingleTickerProviderStateM
     'Bigger pictures and more colours!',
     'Smaller groups - plan your shelf!',
     'The toughest puzzles. Good luck!',
+    'Endless puzzles - each one a little tougher!',
   ];
 
   Widget _tierBannerView(double w, double h, Difficulty tier) => Positioned(
@@ -489,24 +592,43 @@ class _GameScreenState extends State<GameScreen> with SingleTickerProviderStateM
         ),
         child: unlocked
             ? Stack(clipBehavior: Clip.none, alignment: Alignment.center, children: [
-                BoosterIcon(kind: _boosterKinds[i], size: bh * 0.7),
+                Opacity(
+                  opacity: Progress.I.boosters[_boosterKinds[i]]! > 0 ? 1 : 0.55,
+                  child: BoosterIcon(kind: _boosterKinds[i], size: bh * 0.7),
+                ),
                 Positioned(
                   right: -bw * 0.06,
                   bottom: -bh * 0.05,
-                  child: Container(
-                    padding: EdgeInsets.symmetric(horizontal: bw * 0.08),
-                    decoration: BoxDecoration(color: AppColors.green, borderRadius: BorderRadius.circular(bh)),
-                    child: Text(
-                        Progress.I.boosters[_boosterKinds[i]]! > 0 ? '${Progress.I.boosters[_boosterKinds[i]]}' : '+',
-                        style: titleStyle(bh * 0.28)),
-                  ),
+                  child: Progress.I.boosters[_boosterKinds[i]]! > 0
+                      ? Container(
+                          padding: EdgeInsets.symmetric(horizontal: bw * 0.08),
+                          decoration: BoxDecoration(color: AppColors.green, borderRadius: BorderRadius.circular(bh)),
+                          child: Text('${Progress.I.boosters[_boosterKinds[i]]}', style: titleStyle(bh * 0.28)),
+                        )
+                      // Empty: "+" opens a rewarded video for one more.
+                      : Container(
+                          width: bh * 0.36,
+                          height: bh * 0.36,
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFFF9F2E),
+                            shape: BoxShape.circle,
+                            border: Border.all(color: Colors.white, width: 1.5),
+                          ),
+                          child: Icon(Icons.add_rounded, color: Colors.white, size: bh * 0.3),
+                        ),
                 ),
               ])
-            : Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-                _Lock(size: bh * 0.42),
-                SizedBox(height: bh * 0.02),
-                Text('Level ${_boosterLevels[i]}', style: bodyStyle(bh * 0.2, color: AppColors.textDark)),
-              ]),
+            : Padding(
+                padding: EdgeInsets.all(bh * 0.04),
+                child: FittedBox(
+                  fit: BoxFit.scaleDown,
+                  child: Column(mainAxisSize: MainAxisSize.min, children: [
+                    _Lock(size: bh * 0.42),
+                    SizedBox(height: bh * 0.02),
+                    Text('Level ${_boosterLevels[i]}', style: bodyStyle(bh * 0.2, color: AppColors.textDark)),
+                  ]),
+                ),
+              ),
       ),
     );
   }

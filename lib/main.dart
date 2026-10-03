@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import 'ads.dart';
 import 'screens/loading_screen.dart';
 import 'services.dart';
 import 'theme.dart';
@@ -31,19 +32,26 @@ class _DiamondPuzzleAppState extends State<DiamondPuzzleApp> with WidgetsBinding
     super.dispose();
   }
 
+  bool _wasInBackground = false;
+
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
       SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
       Sfx.I.updateMusic();
+      // Only a real return from the background counts (not the notification
+      // shade or a dialog), and Ads ignores returns from its own ads.
+      if (_wasInBackground) Ads.I.onAppResumed();
+      _wasInBackground = false;
     } else if (state == AppLifecycleState.paused) {
+      _wasInBackground = true;
       Sfx.I.pauseMusic();
     }
   }
 
   @override
   Widget build(BuildContext context) => MaterialApp(
-        title: 'Diamond Picture Puzzle',
+        title: 'Jewel Sort: Diamond Pixel Art',
         debugShowCheckedModeBanner: false,
         theme: ThemeData(fontFamily: kBodyFont, scaffoldBackgroundColor: AppColors.gameBg),
         builder: (context, child) => MediaQuery(

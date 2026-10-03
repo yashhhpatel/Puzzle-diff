@@ -230,7 +230,7 @@ class _ShopScreenState extends State<ShopScreen> {
         Expanded(
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Text('Remove Ads', style: titleStyle(w * 0.05)),
-            Text('No more ads between levels', style: bodyStyle(w * 0.032, color: Colors.white.withAlpha(230), weight: 600)),
+            Text('No banner, level or app-open ads', style: bodyStyle(w * 0.032, color: Colors.white.withAlpha(230), weight: 600)),
           ]),
         ),
         owned

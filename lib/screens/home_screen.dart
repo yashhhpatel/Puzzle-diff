@@ -4,6 +4,7 @@ import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../ads.dart';
 import '../config.dart';
 import '../game/autoplay.dart';
 import '../game/gem_art.dart';
@@ -47,10 +48,8 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   void _play({bool daily = false}) {
-    // After level 1000, Play replays a random Very Hard level.
-    final replay = !daily && Progress.I.level > kMaxLevel ? 801 + Random().nextInt(kMaxLevel - 800) : null;
     Navigator.of(context).pushReplacement(PageRouteBuilder(
-      pageBuilder: (_, __, ___) => GameScreen(daily: daily, replay: replay),
+      pageBuilder: (_, __, ___) => GameScreen(daily: daily),
       transitionsBuilder: (_, a, __, child) => FadeTransition(opacity: a, child: child),
     ));
   }
@@ -76,9 +75,9 @@ class _HomeScreenState extends State<HomeScreen> {
     final w = size.width, h = size.height;
     final u = min(w, h * 0.56);
     final p = Progress.I;
-    final allDone = p.level > kMaxLevel;
     return Scaffold(
-      body: PatternBackground(
+      body: Column(children: [
+        Expanded(child: PatternBackground(
         child: SafeArea(
           child: Column(children: [
             Padding(
@@ -100,8 +99,8 @@ class _HomeScreenState extends State<HomeScreen> {
               whiteBorder: true,
               onTap: _play,
               child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-                buttonLabel(allDone ? 'Replay' : 'Play', u * 0.085),
-                Text(allDone ? 'All $kMaxLevel levels done!' : 'Level ${p.level} · ${difficultyOf(p.level).label}',
+                buttonLabel('Play', u * 0.085),
+                Text('Level ${p.level} · ${difficultyOf(p.level).label}',
                     style: bodyStyle(u * 0.04, color: Colors.white.withAlpha(230))),
               ]),
             ),
@@ -116,11 +115,14 @@ class _HomeScreenState extends State<HomeScreen> {
                 height: u * 0.13,
                 whiteBorder: true,
                 onTap: _shop,
-                child: Row(mainAxisSize: MainAxisSize.min, children: [
-                  Icon(Icons.storefront_rounded, color: Colors.white, size: u * 0.06),
-                  SizedBox(width: u * 0.015),
-                  buttonLabel('Shop', u * 0.055),
-                ]),
+                child: FittedBox(
+                  fit: BoxFit.scaleDown,
+                  child: Row(mainAxisSize: MainAxisSize.min, children: [
+                    Icon(Icons.storefront_rounded, color: Colors.white, size: u * 0.06),
+                    SizedBox(width: u * 0.015),
+                    buttonLabel('Shop', u * 0.055),
+                  ]),
+                ),
               ),
               if (!p.adsFree) ...[
                 SizedBox(width: u * 0.04),
@@ -131,11 +133,14 @@ class _HomeScreenState extends State<HomeScreen> {
                   height: u * 0.13,
                   whiteBorder: true,
                   onTap: () => _shop(buy: StoreConfig.removeAds),
-                  child: Row(mainAxisSize: MainAxisSize.min, children: [
-                    Icon(Icons.block_rounded, color: Colors.white, size: u * 0.055),
-                    SizedBox(width: u * 0.015),
-                    buttonLabel('No Ads', u * 0.055),
-                  ]),
+                  child: FittedBox(
+                    fit: BoxFit.scaleDown,
+                    child: Row(mainAxisSize: MainAxisSize.min, children: [
+                      Icon(Icons.block_rounded, color: Colors.white, size: u * 0.055),
+                      SizedBox(width: u * 0.015),
+                      buttonLabel('No Ads', u * 0.055),
+                    ]),
+                  ),
                 ),
               ],
             ]),
@@ -144,7 +149,9 @@ class _HomeScreenState extends State<HomeScreen> {
             SizedBox(height: u * 0.05),
           ]),
         ),
-      ),
+        )),
+        const AdBanner(),
+      ]),
     );
   }
 

@@ -17,14 +17,26 @@ class GameLayout {
   late final List<Rect> slots;
   final int cols, rows;
 
-  GameLayout(this.size, this.cols, this.rows) {
+  /// Board zoom (1 = fitted) and pan offset from the centred position.
+  final double zoom;
+  final Offset pan;
+
+  /// Cell size at zoom 1.
+  late final double baseCell;
+
+  /// Area the board may occupy (and is clipped to) while zoomed: between the
+  /// HUD and the shelf, full width.
+  late final Rect viewport;
+
+  GameLayout(this.size, this.cols, this.rows, {this.zoom = 1, this.pan = Offset.zero}) {
     final w = size.width, h = size.height;
     var c = w * (cols <= 6 ? 0.058 : 0.054);
     c = min(c, w * 0.86 / cols);
     c = min(c, h * 0.5 / rows);
-    cell = c;
-    final boardW = cols * c, boardH = rows * c;
-    boardOrigin = Offset((w - boardW) / 2, h * 0.47 - boardH / 2);
+    baseCell = c;
+    cell = c * zoom;
+    final boardW = cols * cell, boardH = rows * cell;
+    boardOrigin = Offset((w - boardW) / 2, h * 0.47 - boardH / 2) + pan;
     final pitch = w * 0.061, slot = w * 0.044;
     final shelfW = pitch * kShelfSize + w * 0.02;
     final shelfH = w * 0.074;
@@ -32,6 +44,30 @@ class GameLayout {
     final firstX = w / 2 - pitch * (kShelfSize - 1) / 2;
     slots = List.generate(
         kShelfSize, (i) => Rect.fromCenter(center: Offset(firstX + pitch * i, shelfRect.center.dy), width: slot, height: slot));
+    viewport = Rect.fromLTRB(0, h * 0.115, w, shelfRect.top - w * 0.03);
+  }
+
+  /// Largest useful zoom: cells about 16% of the screen width.
+  double get maxZoom => (size.width * 0.16 / baseCell).clamp(1.0, 4.0);
+
+  /// Pan that keeps the board on screen at [z]: centred on an axis where it
+  /// fits, otherwise its edges can't move inside the viewport.
+  Offset clampPan(Offset p, double z) {
+    final c = baseCell * z;
+    final bw = cols * c, bh = rows * c;
+    final cx = (size.width - bw) / 2, cy = size.height * 0.47 - bh / 2;
+    double axis(double v, double origin, double len, double lo, double hi) {
+      if (len <= hi - lo) {
+        // Fits: keep it inside the viewport.
+        return v.clamp(lo - origin, hi - len - origin);
+      }
+      return v.clamp(hi - len - origin, lo - origin);
+    }
+
+    return Offset(
+      axis(p.dx, cx, bw, viewport.left + c * 0.3, viewport.right - c * 0.3),
+      axis(p.dy, cy, bh, viewport.top + c * 0.3, viewport.bottom - c * 0.3),
+    );
   }
 
   Rect boardRect() => boardOrigin & Size(cols * cell, rows * cell);
@@ -41,6 +77,7 @@ class GameLayout {
   /// Board cell under [p], snapping to the nearest cell within half a cell of
   /// the board edge so small cells stay easy to hit.
   int hitCell(Offset p, List<String?> target) {
+    if (zoom > 1.001 && !viewport.contains(p)) return -1;
     final br = boardRect().inflate(cell * 0.5);
     if (!br.contains(p)) return -1;
     final x = ((p.dx - boardOrigin.dx) / cell).floor().clamp(0, cols - 1);
@@ -134,6 +171,12 @@ class BoardPainter extends CustomPainter {
     final L = layout;
     final cell = L.cell;
 
+    // While zoomed, the board stays inside its viewport (never over the HUD or
+    // shelf). Flights are drawn unclipped afterwards so gems can fly out.
+    final zoomed = L.zoom > 1.001;
+    canvas.save();
+    if (zoomed) canvas.clipRect(L.viewport);
+
     paintBoardBase(canvas, L.boardOrigin, cell, g.cols, g.target, g.gems, hidden: g.hiddenCells);
 
     // Loose (misplaced) gems that are not selected.
@@ -143,7 +186,6 @@ class BoardPainter extends CustomPainter {
     }
 
     _paintShines(canvas);
-    _paintShelf(canvas);
 
     // Selected group, lifted above the rest.
     final lift = _ease((g.now - g.selTime) / 0.14);
@@ -154,6 +196,9 @@ class BoardPainter extends CustomPainter {
       final lr = Rect.fromCenter(center: r.center.translate(0, -cell * 0.16 * lift) + shake, width: r.width * (1 + 0.1 * lift), height: r.height * (1 + 0.1 * lift));
       drawGem(canvas, lr, gemColor(g.gems[i]!), lift: lift);
     }
+
+    canvas.restore();
+    _paintShelf(canvas);
 
     // Flights.
     for (final f in g.flights) {

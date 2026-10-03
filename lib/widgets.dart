@@ -98,10 +98,10 @@ class GameLogo extends StatelessWidget {
       height: s * 2.55,
       child: Stack(clipBehavior: Clip.none, alignment: Alignment.topCenter, children: [
         Column(mainAxisSize: MainAxisSize.min, children: [
-          line('DIAMOND', s * 1.15, const [Color(0xFFFFF36B), Color(0xFFFFC21C)]),
+          line('JEWEL SORT', s * 1.15, const [Color(0xFFFFF36B), Color(0xFFFFC21C)]),
           Transform.translate(
             offset: Offset(0, -s * 0.12),
-            child: line('PICTURE PUZZLE', s * 0.72, const [Color(0xFF7FF2FF), Color(0xFF1FA3F5)]),
+            child: line('DIAMOND PIXEL ART', s * 0.72, const [Color(0xFF7FF2FF), Color(0xFF1FA3F5)]),
           ),
         ]),
         Positioned(left: -s * 0.15, top: -s * 0.2, child: _Sparkle(size: s * 0.8)),
@@ -415,6 +415,7 @@ Color tierColor(Difficulty d) => const [
       Color(0xFF1E8FE8), // medium
       Color(0xFFF08A1C), // hard
       Color(0xFFE5394E), // very hard
+      Color(0xFF8C3FE0), // master
     ][d.index];
 
 /// Gold rating star; [filled] false draws the empty slot.
