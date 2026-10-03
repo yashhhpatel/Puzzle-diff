@@ -1,6 +1,7 @@
 import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 /// Persistent player progress and settings.
@@ -84,6 +85,26 @@ class Progress extends ChangeNotifier {
 
   static int dateKey(DateTime d) => d.year * 10000 + d.month * 100 + d.day;
   bool get dailyDoneToday => dailyDone == dateKey(DateTime.now());
+}
+
+/// Version of the installed app, read at runtime from the platform (it comes
+/// from `version:` in pubspec.yaml, e.g. 1.2.0+15 -> "1.2.0" build "15").
+class AppInfo {
+  static String version = '';
+  static String build = '';
+
+  static Future<void> load() async {
+    try {
+      final info = await PackageInfo.fromPlatform();
+      version = info.version;
+      build = info.buildNumber;
+    } catch (e) {
+      debugPrint('package info failed: $e');
+    }
+  }
+
+  /// "v1.2.0 (15)", or "" if unknown.
+  static String get label => version.isEmpty ? '' : (build.isEmpty ? 'v$version' : 'v$version ($build)');
 }
 
 /// Sound effects, music and haptics, honouring the settings toggles.

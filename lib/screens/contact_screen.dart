@@ -74,7 +74,7 @@ class ContactScreen extends StatelessWidget {
       // Uri encodes spaces as '+' in queryParameters, which mail apps show
       // literally, so build the query by hand.
       query: 'subject=${Uri.encodeComponent('[Jewel Sort] $subject')}'
-          '&body=${Uri.encodeComponent('\n\n---\nApp version: 1.0.0\nLevel: ${Progress.I.level}')}',
+          '&body=${Uri.encodeComponent('\n\n---\nApp version: ${AppInfo.label}\nLevel: ${Progress.I.level}')}',
     );
     Ads.I.quietNextResume();
     final ok = await launchUrl(uri).catchError((_) => false);

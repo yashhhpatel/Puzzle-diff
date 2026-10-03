@@ -35,6 +35,9 @@ class _LoadingScreenState extends State<LoadingScreen> with SingleTickerProvider
   }
 
   Future<void> _boot() async {
+    AppInfo.load().then((_) {
+      if (mounted) setState(() {});
+    });
     await Future.wait([
       Progress.I.load().then((_) => Sfx.I.init()),
       Future.delayed(const Duration(milliseconds: 1900)),
@@ -91,7 +94,7 @@ class _LoadingScreenState extends State<LoadingScreen> with SingleTickerProvider
             left: 0,
             right: 0,
             top: h * 0.94,
-            child: Text('v1.0.0', textAlign: TextAlign.center, style: bodyStyle(w * 0.03, color: const Color(0xFFA6A8C8))),
+            child: Text(AppInfo.label, textAlign: TextAlign.center, style: bodyStyle(w * 0.03, color: const Color(0xFFA6A8C8))),
           ),
         ]),
       ),
